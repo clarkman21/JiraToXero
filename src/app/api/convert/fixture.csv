@@ -1,0 +1,4 @@
+Summary,Issue key,Issue id,Created,Resolved,Due date,Custom field (Amount),Custom field (Currency),Custom field (Vendor to be paid),Custom field (Payment details)
+Valid One,SBD-101,1,29/Jan/26 12:09 PM,30/Jan/26 11:38 AM,30/Jan/26,100.50,RWF,Vendor A,
+Invalid Row,SBD-102,2,30/Jan/26,30/Jan/26,,,RWF,Vendor B,
+Valid Two,SBD-103,3,28/Jan/26 2:56 PM,28/Jan/26,28/Jan/26,250,RWF,Huza HR,
