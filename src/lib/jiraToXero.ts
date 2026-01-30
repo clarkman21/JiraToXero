@@ -1,36 +1,16 @@
 /**
- * Map Jira Service Desk payment CSV rows to Xero Bills template format.
- * Uses first occurrence of duplicate Jira column names.
+ * Map Jira Service Desk payment CSV rows to Xero Bills format.
+ * Uses mapping config for column resolution; first occurrence of duplicate Jira column names.
  */
 
-export const XERO_BILL_HEADER = [
-  "*ContactName",
-  "EmailAddress",
-  "POAddressLine1",
-  "POAddressLine2",
-  "POAddressLine3",
-  "POAddressLine4",
-  "POCity",
-  "PORegion",
-  "POPostalCode",
-  "POCountry",
-  "*InvoiceNumber",
-  "*InvoiceDate",
-  "*DueDate",
-  "Total",
-  "InventoryItemCode",
-  "Description",
-  "*Quantity",
-  "*UnitAmount",
-  "*AccountCode",
-  "*TaxType",
-  "TaxAmount",
-  "TrackingName1",
-  "TrackingOption1",
-  "TrackingName2",
-  "TrackingOption2",
-  "Currency",
-] as const;
+import {
+  MAPPING_FIELDS,
+  REQUIRED_JIRA_COLUMNS,
+  XERO_BILL_HEADER,
+  type MappingField,
+} from "./mappingConfig";
+
+export { XERO_BILL_HEADER };
 
 export type XeroBillRow = (string | number)[];
 
@@ -45,25 +25,13 @@ export interface JiraToXeroResult {
   errors: ConversionError[];
 }
 
-const REQUIRED_JIRA_COLUMNS = ["Summary", "Issue key", "Created"];
+export interface ConversionDefaults {
+  taxType?: string;
+  accountCode?: string;
+  quantity?: number;
+}
 
-const JIRA_COLUMN_ALIASES: Record<string, string[]> = {
-  ContactName: [
-    "Custom field (Vendor to be paid)",
-    "Custom field (Supplier / Vendor)",
-  ],
-  Amount: [
-    "Custom field (Amount)",
-    "Custom field (Amount to be paid)",
-    "Custom field (Total amount to be approved for payment)",
-  ],
-  Currency: ["Custom field (Currency)"],
-  PaymentDetails: ["Custom field (Payment details)"],
-  Resolved: ["Resolved"],
-  DueDate: ["Due date", "Custom field (Due Date [Full))"],
-};
-
-/** Build map: logical name -> first column index in headers. */
+/** Build map: header name -> first column index. */
 function buildColumnIndexMap(headers: string[]): Map<string, number> {
   const map = new Map<string, number>();
   for (let i = 0; i < headers.length; i++) {
@@ -73,24 +41,21 @@ function buildColumnIndexMap(headers: string[]): Map<string, number> {
   return map;
 }
 
-/** Get first matching column index for a logical field. */
-function getColumnIndex(
+/** First matching column index for a list of Jira column names. */
+function getFirstColumnIndex(
   map: Map<string, number>,
-  logicalName: string,
-  aliases: string[]
+  jiraSources: string[]
 ): number | undefined {
-  if (map.has(logicalName)) return map.get(logicalName);
-  for (const alias of aliases) {
-    if (map.has(alias)) return map.get(alias);
+  for (const name of jiraSources) {
+    if (map.has(name)) return map.get(name);
   }
   return undefined;
 }
 
-/** Parse Jira date (e.g. "29/Jan/26 12:09 PM" or "DD/MMM/YY") to YYYY-MM-DD. */
+/** Parse Jira date (e.g. "29/Jan/26 12:09 PM") to YYYY-MM-DD. */
 export function parseJiraDate(value: string): string | null {
   const s = (value || "").trim();
   if (!s) return null;
-  // DD/MMM/YY or DD/MMM/YY HH:MM AM/PM
   const match = s.match(/^(\d{1,2})\/([A-Za-z]{3})\/(\d{2,4})(?:\s|$)/);
   if (!match) return null;
   const [, day, monStr, yearPart] = match;
@@ -101,11 +66,9 @@ export function parseJiraDate(value: string): string | null {
   const mon = months[monStr];
   if (!mon) return null;
   const year = yearPart.length === 2 ? `20${yearPart}` : yearPart;
-  const dd = day.padStart(2, "0");
-  return `${year}-${mon}-${dd}`;
+  return `${year}-${mon}-${day.padStart(2, "0")}`;
 }
 
-/** Parse amount string to number. */
 function parseAmount(value: string): number | null {
   const s = (value || "").trim().replace(/,/g, "");
   if (!s) return null;
@@ -113,21 +76,29 @@ function parseAmount(value: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Extract "Account Name: X" from Payment details for ContactName fallback. */
-function parseAccountNameFromPaymentDetails(details: string): string | null {
+/** Extract contact/vendor name from Payment details: "Account Name: X" or "Name : X". */
+function parseContactNameFromPaymentDetails(details: string): string | null {
   if (!details || typeof details !== "string") return null;
-  const match = details.match(/Account\s+Name\s*:\s*([^\n]+)/i);
+  const s = details.trim();
+  let match = s.match(/Account\s+Name\s*:\s*([^\n]+)/i);
+  if (match) return match[1].trim();
+  match = s.match(/Name\s*:\s*([^\n]+)/i);
   return match ? match[1].trim() : null;
 }
 
-export function jiraToXero(headers: string[], dataRows: string[][]): JiraToXeroResult {
+const PAYMENT_DETAILS_JIRA = "Custom field (Payment details)";
+
+export function jiraToXero(
+  headers: string[],
+  dataRows: string[][],
+  defaults?: ConversionDefaults
+): JiraToXeroResult {
   const errors: ConversionError[] = [];
   const map = buildColumnIndexMap(headers);
 
-  const missingRequired: string[] = [];
-  for (const col of REQUIRED_JIRA_COLUMNS) {
-    if (!map.has(col)) missingRequired.push(col);
-  }
+  const missingRequired = (REQUIRED_JIRA_COLUMNS as readonly string[]).filter(
+    (col) => !map.has(col)
+  );
   if (missingRequired.length > 0) {
     return {
       rows: [],
@@ -140,17 +111,27 @@ export function jiraToXero(headers: string[], dataRows: string[][]): JiraToXeroR
     };
   }
 
-  const idxSummary = map.get("Summary")!;
-  const idxIssueKey = map.get("Issue key")!;
-  const idxCreated = map.get("Created")!;
-  const idxResolved = getColumnIndex(map, "Resolved", JIRA_COLUMN_ALIASES.Resolved);
-  const idxDueDate = getColumnIndex(map, "Due date", ["Due date", "Custom field (Due Date [Full))"]);
-  const idxAmount = getColumnIndex(map, "Custom field (Amount)", JIRA_COLUMN_ALIASES.Amount);
-  const idxCurrency = getColumnIndex(map, "Custom field (Currency)", JIRA_COLUMN_ALIASES.Currency);
-  const idxVendor = getColumnIndex(map, "Custom field (Vendor to be paid)", JIRA_COLUMN_ALIASES.ContactName);
-  const idxPaymentDetails = getColumnIndex(map, "Custom field (Payment details)", JIRA_COLUMN_ALIASES.PaymentDetails);
+  /** Resolved: for each Xero column index, { jiraIndex, type }. */
+  const resolved: { jiraIndex: number | undefined; field: MappingField }[] = MAPPING_FIELDS.map(
+    (field) => ({
+      jiraIndex: getFirstColumnIndex(map, field.jiraSources),
+      field,
+    })
+  );
+  const paymentDetailsIndex = map.get(PAYMENT_DETAILS_JIRA);
+  const contactField = MAPPING_FIELDS[0];
 
   const rows: XeroBillRow[] = [];
+
+  const headerLength = headers.length;
+  const issueKeyIdx = map.get("Issue key");
+  const resolvedIdx = map.get("Resolved");
+  const createdIdx = map.get("Created");
+  const amountIdx = getFirstColumnIndex(map, [
+    "Custom field (Amount)",
+    "Custom field (Amount to be paid)",
+    "Custom field (Total amount to be approved for payment)",
+  ]);
 
   for (let r = 0; r < dataRows.length; r++) {
     const rowIndex = r + 1;
@@ -158,29 +139,111 @@ export function jiraToXero(headers: string[], dataRows: string[][]): JiraToXeroR
     const get = (index: number | undefined): string =>
       index !== undefined && row[index] !== undefined ? String(row[index]).trim() : "";
 
-    const summary = get(idxSummary);
-    const issueKey = get(idxIssueKey);
-    const createdStr = get(idxCreated);
-    const resolvedStr = idxResolved !== undefined ? get(idxResolved) : "";
-    const dueDateStr = idxDueDate !== undefined ? get(idxDueDate) : resolvedStr;
-    const amountStr = idxAmount !== undefined ? get(idxAmount) : "";
-    const currency = idxCurrency !== undefined ? get(idxCurrency) : "";
-    const vendor = idxVendor !== undefined ? get(idxVendor) : "";
-    const paymentDetails = idxPaymentDetails !== undefined ? get(idxPaymentDetails) : "";
+    const firstCell = (row?.[0] ?? "").toString().trim();
+    if (!firstCell) continue;
 
-    let contactName = vendor || parseAccountNameFromPaymentDetails(paymentDetails) || "";
-    const invoiceDate = parseJiraDate(createdStr);
-    const dueDate = parseJiraDate(dueDateStr) || invoiceDate;
-    const amount = parseAmount(amountStr);
+    // #region agent log
+    if (rowIndex === 94) {
+      fetch("http://127.0.0.1:7244/ingest/badc5133-8047-4b9a-8263-c2bd896fb205", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          location: "jiraToXero.ts:row94",
+          message: "Row 94 debug",
+          hypothesisId: "A",
+          data: {
+            rowIndex,
+            rowLength: row?.length,
+            headerLength,
+            columnMismatch: row?.length !== headerLength,
+            cell0: row?.[0]?.toString().slice(0, 80),
+            issueKeyRaw: issueKeyIdx !== undefined ? get(issueKeyIdx) : null,
+            resolvedRaw: resolvedIdx !== undefined ? get(resolvedIdx) : null,
+            createdRaw: createdIdx !== undefined ? get(createdIdx) : null,
+            amountRaw: amountIdx !== undefined ? get(amountIdx) : null,
+          },
+          timestamp: Date.now(),
+          sessionId: "debug-session",
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
+
+    /** ContactName: first non-empty from jiraSources, then parse Payment details for "Name :" or "Account Name:". */
+    let contactName = "";
+    for (const src of contactField.jiraSources) {
+      const idx = getFirstColumnIndex(map, [src]);
+      const val = get(idx);
+      if (val) {
+        contactName = val;
+        break;
+      }
+    }
+    if (!contactName && paymentDetailsIndex !== undefined) {
+      const parsed = parseContactNameFromPaymentDetails(get(paymentDetailsIndex));
+      if (parsed) contactName = parsed;
+    }
+
+    const rawValues: (string | number)[] = resolved.map(({ jiraIndex, field }) => {
+      if (field.type === "contact") return contactName;
+      if (field.type === "date") {
+        for (const src of field.jiraSources) {
+          const idx = getFirstColumnIndex(map, [src]);
+          const val = get(idx);
+          const parsed = parseJiraDate(val);
+          if (parsed) return parsed;
+        }
+        return "";
+      }
+      const raw = get(jiraIndex);
+      if (field.type === "amount") {
+        const n = parseAmount(raw);
+        return n !== null ? n : raw;
+      }
+      return raw;
+    });
+
+    const issueKey = rawValues[10] as string;
+    const invoiceDate = rawValues[11] as string;
+    const dueDate = (rawValues[12] as string) || invoiceDate;
+    const total = rawValues[13];
+    const amountNum = typeof total === "number" ? total : parseAmount(String(total ?? ""));
+    const summary = rawValues[15] as string;
+    const currency = (rawValues[25] as string) || "";
 
     const rowErrors: string[] = [];
     if (!contactName) rowErrors.push("ContactName");
     if (!issueKey) rowErrors.push("InvoiceNumber");
     if (!invoiceDate) rowErrors.push("InvoiceDate");
-    if (dueDate === null && !invoiceDate) rowErrors.push("DueDate");
-    if (amount === null && amountStr !== "") rowErrors.push("Amount (invalid number)");
-    if (amount === null && amountStr === "" && !rowErrors.includes("Amount (invalid number)"))
-      rowErrors.push("Amount (missing)");
+    if (!dueDate) rowErrors.push("DueDate");
+    if (amountNum === null || amountNum === undefined)
+      rowErrors.push("Amount (missing or invalid)");
+    else if (typeof amountNum !== "number") rowErrors.push("Amount (invalid number)");
+
+    // #region agent log
+    if (rowIndex === 94) {
+      fetch("http://127.0.0.1:7244/ingest/badc5133-8047-4b9a-8263-c2bd896fb205", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          location: "jiraToXero.ts:row94-resolved",
+          message: "Row 94 resolved values and errors",
+          hypothesisId: "B",
+          data: {
+            rowIndex,
+            contactName: contactName || "(empty)",
+            issueKey: issueKey || "(empty)",
+            invoiceDate: invoiceDate || "(empty)",
+            dueDate: dueDate || "(empty)",
+            amountNum,
+            rowErrors,
+          },
+          timestamp: Date.now(),
+          sessionId: "debug-session",
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
 
     if (rowErrors.length > 0) {
       errors.push({
@@ -191,30 +254,30 @@ export function jiraToXero(headers: string[], dataRows: string[][]): JiraToXeroR
       continue;
     }
 
-    const total = amount ?? 0;
-    const quantity = 1;
-    const unitAmount = total;
-    // TODO: Optional: make AccountCode/TaxType configurable per-org or via env.
-    const accountCode = "";
-    const taxType = "None";
+    const totalNum = typeof amountNum === "number" ? amountNum : 0;
+    const quantity = defaults?.quantity ?? 1;
+    const unitAmount = totalNum;
+    const accountCode = defaults?.accountCode ?? "";
+    const taxType = defaults?.taxType ?? "None";
+    const poCountry = (rawValues[9] as string) || "";
 
     const xeroRow: XeroBillRow = [
       contactName,
-      "", // EmailAddress
-      "", "", "", "", "", "", "", "", // PO address
+      "",
+      "", "", "", "", "", "", "", poCountry,
       issueKey,
-      invoiceDate!,
-      dueDate!,
-      total,
-      "", // InventoryItemCode
+      invoiceDate,
+      dueDate,
+      totalNum,
+      "",
       summary,
       quantity,
       unitAmount,
       accountCode,
       taxType,
-      "", // TaxAmount
-      "", "", "", "", // Tracking
-      currency || "",
+      "",
+      "", "", "", "",
+      currency,
     ];
     rows.push(xeroRow);
   }

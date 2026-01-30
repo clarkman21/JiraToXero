@@ -61,12 +61,15 @@ export function parseCsv(csv: string): string[][] {
  * Get header row and data rows from parsed CSV.
  * Returns { headers, rows } or throws if empty.
  */
+const BOM = "\uFEFF";
+
 export function parseCsvWithHeaders(csv: string): { headers: string[]; rows: string[][] } {
   const trimmed = csv.trim();
   if (!trimmed) throw new Error("CSV is empty");
-  const all = parseCsv(csv);
+  const withoutBom = csv.startsWith(BOM) ? csv.slice(BOM.length) : csv;
+  const all = parseCsv(withoutBom);
   if (all.length === 0) throw new Error("CSV is empty");
-  const headers = all[0];
+  const headers = all[0].map((h) => h.trim());
   const rows = all.slice(1);
   return { headers, rows };
 }

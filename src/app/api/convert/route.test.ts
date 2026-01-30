@@ -36,6 +36,12 @@ describe("POST /api/convert", () => {
     expect(data.xeroCsv).toBeDefined();
     expect(data.xeroCsv).toContain("*ContactName");
     expect(data.rowCount).toBe(2);
+    const lines = (data.xeroCsv as string).trim().split("\n");
+    expect(lines.length).toBe(3);
+    const headerCols = lines[0].split(",").length;
+    const firstRowCols = lines[1].split(",").length;
+    expect(headerCols).toBe(26);
+    expect(firstRowCols).toBe(26);
     expect(data.errors).toBeDefined();
     expect(data.errors.length).toBeGreaterThanOrEqual(1);
     const invalidRowError = data.errors.find(

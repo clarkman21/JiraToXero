@@ -54,6 +54,13 @@ describe("parseCsvWithHeaders", () => {
     ]);
   });
 
+  it("strips BOM from start so headers match", () => {
+    const csv = "\uFEFFSummary,Issue key\nSBD-1,SBD-1";
+    const { headers, rows } = parseCsvWithHeaders(csv);
+    expect(headers[0]).toBe("Summary");
+    expect(headers).toContain("Issue key");
+  });
+
   it("throws on empty CSV", () => {
     expect(() => parseCsvWithHeaders("")).toThrow("CSV is empty");
   });

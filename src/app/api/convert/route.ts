@@ -1,13 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseCsvWithHeaders } from "@/lib/csv";
-import { jiraToXero, XERO_BILL_HEADER } from "@/lib/jiraToXero";
+import {
+  jiraToXero,
+  XERO_BILL_HEADER,
+  type ConversionDefaults,
+} from "@/lib/jiraToXero";
 import { serializeCsv } from "@/lib/csv";
 
 const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024;
 
+function parseDefaults(raw: unknown): ConversionDefaults | undefined {
+  if (raw == null) return undefined;
+  if (typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  let quantity: number | undefined;
+  if (typeof o.quantity === "number" && Number.isInteger(o.quantity)) {
+    quantity = o.quantity;
+  } else if (typeof o.quantity === "string") {
+    const n = parseInt(o.quantity, 10);
+    if (Number.isInteger(n)) quantity = n;
+  }
+  return {
+    taxType: typeof o.taxType === "string" ? o.taxType : undefined,
+    accountCode: typeof o.accountCode === "string" ? o.accountCode : undefined,
+    quantity,
+  };
+}
+
 export async function POST(request: NextRequest) {
   try {
     let csvRaw: string;
+    let defaults: ConversionDefaults | undefined;
 
     const contentType = request.headers.get("content-type") || "";
     if (contentType.includes("application/json")) {
@@ -19,6 +42,7 @@ export async function POST(request: NextRequest) {
         );
       }
       csvRaw = typeof body.csv === "string" ? body.csv : "";
+      defaults = parseDefaults(body.defaults);
     } else if (contentType.includes("multipart/form-data")) {
       const formData = await request.formData();
       const file = formData.get("file");
@@ -43,6 +67,14 @@ export async function POST(request: NextRequest) {
         );
       }
       csvRaw = await file.text();
+      const defaultsStr = formData.get("defaults");
+      if (typeof defaultsStr === "string") {
+        try {
+          defaults = parseDefaults(JSON.parse(defaultsStr));
+        } catch {
+          /* ignore */
+        }
+      }
     } else {
       const text = await request.text();
       if (!text.trim()) {
@@ -78,7 +110,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { rows, errors } = jiraToXero(headers, dataRows);
+    const { rows, errors } = jiraToXero(headers, dataRows, defaults);
 
     if (errors.length > 0 && rows.length === 0) {
       return NextResponse.json(

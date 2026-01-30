@@ -57,7 +57,7 @@ describe("jiraToXero", () => {
     const row = result.rows[0];
     expect(row[0]).toBe("Acme Ltd");
     expect(row[10]).toBe("SBD-123");
-    expect(row[11]).toBe("2026-01-29");
+    expect(row[11]).toBe("2026-01-30");
     expect(row[12]).toBe("2026-01-30");
     expect(row[13]).toBe(14644);
     expect(row[15]).toBe("Test Payment");
@@ -117,6 +117,26 @@ describe("jiraToXero", () => {
     const result = jiraToXero(headers, rows);
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0][0]).toBe("Huza HR Ltd");
+  });
+
+  it("falls back to Name : from Payment details for ContactName (Jira format)", () => {
+    const headers = minimalHeaders;
+    const rows = [
+      [
+        "Reimbursement",
+        "SBD-3",
+        "29/Jan/26 12:09 PM",
+        "30/Jan/26",
+        "30/Jan/26",
+        "14644",
+        "Rwf",
+        "",
+        "Name : Norbert Mugwaneza\n\nPhone : 0788667519",
+      ],
+    ];
+    const result = jiraToXero(headers, rows);
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0][0]).toBe("Norbert Mugwaneza");
   });
 
   it("reports invalid row and skips it", () => {
