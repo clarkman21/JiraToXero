@@ -123,16 +123,6 @@ export function jiraToXero(
 
   const rows: XeroBillRow[] = [];
 
-  const headerLength = headers.length;
-  const issueKeyIdx = map.get("Issue key");
-  const resolvedIdx = map.get("Resolved");
-  const createdIdx = map.get("Created");
-  const amountIdx = getFirstColumnIndex(map, [
-    "Custom field (Amount)",
-    "Custom field (Amount to be paid)",
-    "Custom field (Total amount to be approved for payment)",
-  ]);
-
   for (let r = 0; r < dataRows.length; r++) {
     const rowIndex = r + 1;
     const row = dataRows[r];
@@ -141,33 +131,6 @@ export function jiraToXero(
 
     const firstCell = (row?.[0] ?? "").toString().trim();
     if (!firstCell) continue;
-
-    // #region agent log
-    if (rowIndex === 94) {
-      fetch("http://127.0.0.1:7244/ingest/badc5133-8047-4b9a-8263-c2bd896fb205", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          location: "jiraToXero.ts:row94",
-          message: "Row 94 debug",
-          hypothesisId: "A",
-          data: {
-            rowIndex,
-            rowLength: row?.length,
-            headerLength,
-            columnMismatch: row?.length !== headerLength,
-            cell0: row?.[0]?.toString().slice(0, 80),
-            issueKeyRaw: issueKeyIdx !== undefined ? get(issueKeyIdx) : null,
-            resolvedRaw: resolvedIdx !== undefined ? get(resolvedIdx) : null,
-            createdRaw: createdIdx !== undefined ? get(createdIdx) : null,
-            amountRaw: amountIdx !== undefined ? get(amountIdx) : null,
-          },
-          timestamp: Date.now(),
-          sessionId: "debug-session",
-        }),
-      }).catch(() => {});
-    }
-    // #endregion
 
     /** ContactName: first non-empty from jiraSources, then parse Payment details for "Name :" or "Account Name:". */
     let contactName = "";
@@ -219,31 +182,6 @@ export function jiraToXero(
     if (amountNum === null || amountNum === undefined)
       rowErrors.push("Amount (missing or invalid)");
     else if (typeof amountNum !== "number") rowErrors.push("Amount (invalid number)");
-
-    // #region agent log
-    if (rowIndex === 94) {
-      fetch("http://127.0.0.1:7244/ingest/badc5133-8047-4b9a-8263-c2bd896fb205", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          location: "jiraToXero.ts:row94-resolved",
-          message: "Row 94 resolved values and errors",
-          hypothesisId: "B",
-          data: {
-            rowIndex,
-            contactName: contactName || "(empty)",
-            issueKey: issueKey || "(empty)",
-            invoiceDate: invoiceDate || "(empty)",
-            dueDate: dueDate || "(empty)",
-            amountNum,
-            rowErrors,
-          },
-          timestamp: Date.now(),
-          sessionId: "debug-session",
-        }),
-      }).catch(() => {});
-    }
-    // #endregion
 
     if (rowErrors.length > 0) {
       errors.push({
