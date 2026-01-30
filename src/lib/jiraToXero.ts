@@ -41,6 +41,18 @@ function buildColumnIndexMap(headers: string[]): Map<string, number> {
   return map;
 }
 
+/** Build map: header name -> all column indices (for duplicate column names). */
+function buildAllIndicesMap(headers: string[]): Map<string, number[]> {
+  const map = new Map<string, number[]>();
+  for (let i = 0; i < headers.length; i++) {
+    const h = headers[i].trim();
+    const arr = map.get(h) ?? [];
+    arr.push(i);
+    map.set(h, arr);
+  }
+  return map;
+}
+
 /** First matching column index for a list of Jira column names. */
 function getFirstColumnIndex(
   map: Map<string, number>,
@@ -50,6 +62,24 @@ function getFirstColumnIndex(
     if (map.has(name)) return map.get(name);
   }
   return undefined;
+}
+
+/** First non-empty value from any jiraSource column (tries all occurrences of each name). */
+function getFirstNonEmpty(
+  get: (index: number | undefined) => string,
+  allIndicesMap: Map<string, number[]>,
+  jiraSources: string[]
+): string {
+  for (const name of jiraSources) {
+    const indices = allIndicesMap.get(name);
+    if (indices) {
+      for (const idx of indices) {
+        const val = get(idx);
+        if (val) return val;
+      }
+    }
+  }
+  return "";
 }
 
 /** Parse Jira date (e.g. "29/Jan/26 12:09 PM") to YYYY-MM-DD. */
@@ -95,6 +125,7 @@ export function jiraToXero(
 ): JiraToXeroResult {
   const errors: ConversionError[] = [];
   const map = buildColumnIndexMap(headers);
+  const allIndicesMap = buildAllIndicesMap(headers);
 
   const missingRequired = (REQUIRED_JIRA_COLUMNS as readonly string[]).filter(
     (col) => !map.has(col)
@@ -151,18 +182,31 @@ export function jiraToXero(
       if (field.type === "contact") return contactName;
       if (field.type === "date") {
         for (const src of field.jiraSources) {
-          const idx = getFirstColumnIndex(map, [src]);
-          const val = get(idx);
-          const parsed = parseJiraDate(val);
-          if (parsed) return parsed;
+          const indices = allIndicesMap.get(src);
+          if (indices) {
+            for (const idx of indices) {
+              const val = get(idx);
+              const parsed = parseJiraDate(val);
+              if (parsed) return parsed;
+            }
+          }
         }
         return "";
       }
-      const raw = get(jiraIndex);
       if (field.type === "amount") {
-        const n = parseAmount(raw);
-        return n !== null ? n : raw;
+        for (const src of field.jiraSources) {
+          const indices = allIndicesMap.get(src);
+          if (indices) {
+            for (const idx of indices) {
+              const val = get(idx);
+              const n = parseAmount(val);
+              if (n !== null) return n;
+            }
+          }
+        }
+        return "";
       }
+      const raw = getFirstNonEmpty(get, allIndicesMap, field.jiraSources) || get(jiraIndex);
       return raw;
     });
 

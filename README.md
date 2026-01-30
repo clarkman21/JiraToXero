@@ -13,8 +13,56 @@ Open [http://localhost:3000](http://localhost:3000), upload your Jira CSV, click
 
 ## Deploy to Vercel
 
-- Push the repo to GitHub and import the project in [Vercel](https://vercel.com). Next.js is auto-detected.
-- Or use the Vercel CLI: `vercel` from the project root.
+### Prerequisites
+
+- Node.js 18+ and npm
+- A [Vercel](https://vercel.com) account
+- Git (for dashboard deploy) or [Vercel CLI](https://vercel.com/docs/cli) (optional)
+
+### Option 1: Deploy via Vercel Dashboard (recommended)
+
+1. Push this repo to GitHub (or GitLab/Bitbucket).
+2. Go to [vercel.com/new](https://vercel.com/new) and sign in.
+3. **Import** your repository. Vercel will detect Next.js automatically.
+4. Leave the defaults:
+   - **Build Command:** `npm run build` (or `next build`)
+   - **Output Directory:** (auto for Next.js)
+   - **Install Command:** `npm install`
+5. Click **Deploy**. Your app will be live at `https://<your-project>.vercel.app`.
+
+### Option 2: Deploy via Vercel CLI
+
+1. Install the CLI: `npm i -g vercel`
+2. From the project root, run:
+
+```bash
+npm install
+npm run build
+vercel
+```
+
+3. Follow the prompts (link to existing project or create new). Use `vercel --prod` to deploy to production after the first deploy.
+
+### Build and start commands (reference)
+
+| Command        | Description                |
+|----------------|----------------------------|
+| `npm install`  | Install dependencies      |
+| `npm run build`| Build for production       |
+| `npm run start`| Run production build      |
+| `npm run dev`  | Run dev server             |
+
+The project includes a `vercel.json` with `"framework": "nextjs"` so Vercel uses the correct settings. No environment variables are required for basic use.
+
+### Troubleshooting: "No Next.js version detected"
+
+- **Root Directory:** In Vercel → Project → **Settings** → **General**, set **Root Directory** to `.` or leave it **empty** so Vercel uses the repo root where `package.json` (with `next` in dependencies) lives. If this is set to a subfolder that has no `package.json`, the build will fail.
+- **Commit `package.json`:** Ensure `package.json` and `package-lock.json` are committed and pushed so Vercel sees `"next": "14.2.0"` in dependencies.
+
+### Troubleshooting: "npm install" exited with 254
+
+- The project uses **`npm ci`** in `vercel.json` (installCommand) for a reproducible install; ensure **`package-lock.json`** is committed.
+- **Node version** is pinned to **20.x** in `package.json` (`engines.node`). If 254 persists, try Node **22.x** in Vercel → Settings → General → Node.js Version, or set `"node": "22.x"` in `engines`.
 
 ## Usage
 
